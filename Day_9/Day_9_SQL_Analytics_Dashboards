@@ -1,0 +1,87 @@
+
+SELECT current_catalog(), current_schema();
+
+
+SHOW CATALOGS;
+
+SHOW SCHEMAS IN ecommerce;
+
+SHOW TABLES IN ecommerce.silver;
+
+SHOW TABLES IN ecommerce.bronze;
+
+SHOW TABLES IN ecommerce.gold;
+
+DESCRIBE TABLE ecommerce.silver.daily_sales;
+
+DESCRIBE TABLE ecommerce.bronze.events;
+
+DESCRIBE TABLE ecommerce.gold.products;
+
+DESCRIBE TABLE ecommerce.gold.top_products;
+
+
+-- Revenue with 7-day moving average
+
+WITH daily AS (
+    SELECT
+        event_date,
+        SUM(total_revenue) AS rev
+    FROM ecommerce.gold.top_products
+    GROUP BY event_date
+)
+
+SELECT
+    event_date,
+    rev,
+    AVG(rev) OVER (
+        ORDER BY event_date
+        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+    ) AS ma7
+FROM daily
+ORDER BY event_date;
+
+
+
+
+-- Conversion Funnel (Views -> Purchases)
+
+SELECT
+    category_code,
+    SUM(CASE WHEN event_type = 'view' THEN 1 ELSE 0 END) AS views,
+    SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) AS purchases,
+    ROUND(
+        SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) * 100.0 /
+        NULLIF(SUM(CASE WHEN event_type = 'view' THEN 1 ELSE 0 END), 0),
+        2
+    ) AS conversion_rate
+FROM ecommerce.bronze.events
+GROUP BY category_code
+ORDER BY conversion_rate DESC;
+
+
+-- Customer Segmentation (Regular / Loyal / VIP)
+
+WITH customer_metrics AS (
+    SELECT
+        user_id,
+        COUNT(*) AS purchase_count,
+        SUM(price) AS total_spent
+    FROM ecommerce.bronze.events
+    WHERE event_type = 'purchase'
+    GROUP BY user_id
+)
+
+SELECT
+    CASE
+        WHEN purchase_count >= 10 THEN 'VIP'
+        WHEN purchase_count >= 5 THEN 'Loyal'
+        ELSE 'Regular'
+    END AS customer_tier,
+    COUNT(*) AS customers,
+    ROUND(AVG(total_spent), 2) AS avg_lifetime_value
+FROM customer_metrics
+GROUP BY customer_tier
+ORDER BY avg_lifetime_value DESC;
+
+
